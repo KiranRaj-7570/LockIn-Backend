@@ -10,7 +10,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "https://lockin-frontend-nine.vercel.app",
+      "https://lockin-frontend-g4luzx32z-kiran-raj-ks-projects.vercel.app",
     ],
     credentials: true,
   })
