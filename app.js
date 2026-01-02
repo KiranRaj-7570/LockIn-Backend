@@ -5,7 +5,17 @@ import habitRoutes from "./routes/habit.routes.js";
 
 const app = express();
 
-app.use(cors());
+
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://lockin-frontend-nine.vercel.app",
+    ],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
