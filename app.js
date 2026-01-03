@@ -8,15 +8,26 @@ const app = express();
 /* CORS MUST BE FIRST */
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "https://lockin-frontend-g4luzx32z-kiran-raj-ks-projects.vercel.app",
-    ],
+    origin: (origin, callback) => {
+      // allow requests with no origin (like curl, mobile apps)
+      if (!origin) return callback(null, true);
+
+      // allow all vercel preview + production domains
+      if (
+        origin.startsWith("http://localhost") ||
+        origin.includes("vercel.app")
+      ) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
 
 app.use(express.json());
 
