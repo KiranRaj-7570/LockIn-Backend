@@ -3,51 +3,93 @@ import HabitProgress from "../models/HabitProgress.js";
 import { calculateProgress } from "../utils/progress.js";
 import { getMonthYear } from "../utils/dateContext.js";
 
+// CREATE HABIT
 export const createHabit = async (req, res) => {
   try {
     const { name } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ message: "Habit name is required" });
+    // Validation
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Habit name is required",
+      });
     }
 
+    if (name.trim().length > 50) {
+      return res.status(400).json({
+        success: false,
+        message: "Habit name must be less than 50 characters",
+      });
+    }
+
+    // Create habit
     const habit = await Habit.create({
       user: req.user._id,
-      name,
+      name: name.trim(),
     });
 
-    res.status(201).json(habit);
+    res.status(201).json({
+      success: true,
+      message: "Habit created successfully",
+      habitId: habit._id,
+      name: habit.name,
+      createdAt: habit.createdAt,
+    });
   } catch (err) {
-    res.status(500).json({ message: "Failed to create habit" });
+    console.error("Create habit error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create habit",
+    });
   }
 };
 
+// GET HABITS WITH PROGRESS
 export const getHabits = async (req, res) => {
   try {
     const { month, year } = getMonthYear(req.query.month, req.query.year);
 
     const endOfMonth = new Date(year, month, 0, 23, 59, 59);
 
-    const habits = await Habit.find({
-      user: req.user._id,
-      isActive: true,
-      createdAt: { $lte: endOfMonth },
-    }).sort({ createdAt: 1 });
+    // Fetch habits and progress in parallel for better performance
+    const [habits, progressDocs] = await Promise.all([
+      Habit.find({
+        user: req.user._id,
+        isActive: true,
+        createdAt: { $lte: endOfMonth },
+      })
+        .select("_id name createdAt")
+        .lean()
+        .sort({ createdAt: 1 }),
+      HabitProgress.find({
+        user: req.user._id,
+        month,
+        year,
+      })
+        .select("habit days")
+        .lean(),
+    ]);
 
-    const progressDocs = await HabitProgress.find({
-      user: req.user._id,
-      month,
-      year,
-    });
-
+    // Create progress map for O(1) lookup
     const progressMap = {};
     progressDocs.forEach((p) => {
       progressMap[p.habit.toString()] = p;
     });
 
+    // Map habits with their progress
     const result = habits.map((habit) => {
       const progress = progressMap[habit._id.toString()];
-      const days = progress ? Object.fromEntries(progress.days) : {};
+      
+      // Convert progress.days to plain object
+      let days = {};
+      if (progress && progress.days) {
+        if (progress.days instanceof Map) {
+          days = Object.fromEntries(progress.days);
+        } else if (typeof progress.days === 'object') {
+          days = progress.days;
+        }
+      }
 
       const { completedDays, totalDaysInMonth, percentage } = calculateProgress(
         days,
@@ -67,36 +109,59 @@ export const getHabits = async (req, res) => {
       };
     });
 
-    res.json(result);
-  } catch {
-    res.status(500).json({ message: "Failed to fetch habits" });
+    res.json({
+      success: true,
+      data: result,
+      count: result.length,
+    });
+  } catch (err) {
+    console.error("Get habits error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch habits",
+    });
   }
 };
 
+// TOGGLE DAY
 export const toggleDay = async (req, res) => {
   try {
     const { habitId } = req.params;
-    const { day } = req.body;
-    const { month, year } = getMonthYear(req.body.month, req.body.year);
+    const { day, month, year } = req.body;
 
+    // Validation
     if (!day) {
-      return res.status(400).json({ message: "day is required" });
+      return res.status(400).json({
+        success: false,
+        message: "Day is required",
+      });
     }
 
     if (day < 1 || day > 31) {
-      return res.status(400).json({ message: "Invalid day" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid day",
+      });
     }
 
-    const habit = await Habit.findOne({
-      _id: habitId,
-      user: req.user._id,
-      isActive: true,
-    });
+    // Verify habit exists and belongs to user
+    const habit = await Habit.findOne(
+      {
+        _id: habitId,
+        user: req.user._id,
+        isActive: true,
+      },
+      { _id: 1 }
+    ).lean();
 
     if (!habit) {
-      return res.status(404).json({ message: "Habit not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Habit not found",
+      });
     }
 
+    // Get or create progress document
     let progress = await HabitProgress.findOne({
       user: req.user._id,
       habit: habitId,
@@ -110,10 +175,11 @@ export const toggleDay = async (req, res) => {
         habit: habitId,
         month,
         year,
-        days: {},
+        days: new Map(),
       });
     }
 
+    // Toggle day
     const dayKey = String(day);
     const currentValue = progress.days.get(dayKey) || false;
     progress.days.set(dayKey, !currentValue);
@@ -121,63 +187,93 @@ export const toggleDay = async (req, res) => {
     await progress.save();
 
     res.json({
+      success: true,
+      message: "Day toggled successfully",
       habitId,
       month,
       year,
       days: Object.fromEntries(progress.days),
     });
   } catch (err) {
-    console.error("TOGGLE DAY ERROR:", err);
-    res.status(500).json({ message: "Failed to toggle day" });
+    console.error("Toggle day error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to toggle day",
+    });
   }
 };
 
+// DELETE HABIT
 export const deleteHabit = async (req, res) => {
   try {
     const { habitId } = req.params;
 
-    const habit = await Habit.findOne({
-      _id: habitId,
-      user: req.user._id,
-      isActive: true,
-    });
+    // Use findOneAndUpdate for atomic operation
+    const habit = await Habit.findOneAndUpdate(
+      {
+        _id: habitId,
+        user: req.user._id,
+        isActive: true,
+      },
+      { isActive: false },
+      { new: true }
+    ).select("_id name");
 
     if (!habit) {
-      return res.status(404).json({ message: "Habit not found" });
-    }
-
-    habit.isActive = false;
-    await habit.save();
-
-    res.json({ message: "Habit deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to delete habit" });
-  }
-};
-
-export const getHabitStart = async (req, res) => {
-  try {
-    const firstHabit = await Habit.findOne({
-      user: req.user._id,
-      isActive: true,
-    }).sort({ createdAt: 1 });
-
-    // No habits yet → fallback to user creation date
-    if (!firstHabit) {
-      const user = req.user;
-      return res.json({
-        startMonth: user.createdAt.getMonth() + 1,
-        startYear: user.createdAt.getFullYear(),
+      return res.status(404).json({
+        success: false,
+        message: "Habit not found",
       });
     }
 
-    const date = firstHabit.createdAt;
-
     res.json({
-      startMonth: date.getMonth() + 1,
-      startYear: date.getFullYear(),
+      success: true,
+      message: "Habit deleted successfully",
+      habitId: habit._id,
     });
   } catch (err) {
-    res.status(500).json({ message: "Failed to get habit start" });
+    console.error("Delete habit error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete habit",
+    });
+  }
+};
+
+// GET HABIT START DATE
+export const getHabitStart = async (req, res) => {
+  try {
+    const firstHabit = await Habit.findOne(
+      {
+        user: req.user._id,
+        isActive: true,
+      },
+      { createdAt: 1 }
+    )
+      .lean()
+      .sort({ createdAt: 1 });
+
+    // Use first habit date or user creation date
+    let startMonth, startYear;
+
+    if (firstHabit) {
+      startMonth = firstHabit.createdAt.getMonth() + 1;
+      startYear = firstHabit.createdAt.getFullYear();
+    } else {
+      startMonth = req.user.createdAt.getMonth() + 1;
+      startYear = req.user.createdAt.getFullYear();
+    }
+
+    res.json({
+      success: true,
+      startMonth,
+      startYear,
+    });
+  } catch (err) {
+    console.error("Get habit start error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get habit start date",
+    });
   }
 };
