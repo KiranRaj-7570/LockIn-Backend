@@ -4,6 +4,7 @@ import {
   getHabits,
   createHabit,
   toggleDay,
+  updateHabit,
   deleteHabit,
   getHabitStart,
 } from "../controllers/habit.controller.js";
@@ -14,6 +15,7 @@ router.get("/start", protect, getHabitStart);
 
 router.get("/", protect, getHabits);
 router.post("/", protect, createHabit);
+router.patch("/:habitId", protect, updateHabit);
 router.patch("/:habitId/toggle", protect, toggleDay);
 router.delete("/:habitId", protect, deleteHabit);
 

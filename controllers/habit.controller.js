@@ -203,6 +203,59 @@ export const toggleDay = async (req, res) => {
   }
 };
 
+// UPDATE HABIT
+export const updateHabit = async (req, res) => {
+  try {
+    const { habitId } = req.params;
+    const { name } = req.body;
+
+    // Validation
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Habit name is required",
+      });
+    }
+
+    if (name.trim().length > 50) {
+      return res.status(400).json({
+        success: false,
+        message: "Habit name must be less than 50 characters",
+      });
+    }
+
+    const habit = await Habit.findOneAndUpdate(
+      {
+        _id: habitId,
+        user: req.user._id,
+        isActive: true,
+      },
+      { name: name.trim() },
+      { new: true, runValidators: true }
+    ).select("_id name");
+
+    if (!habit) {
+      return res.status(404).json({
+        success: false,
+        message: "Habit not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Habit updated successfully",
+      habitId: habit._id,
+      name: habit.name,
+    });
+  } catch (err) {
+    console.error("Update habit error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update habit",
+    });
+  }
+};
+
 // DELETE HABIT
 export const deleteHabit = async (req, res) => {
   try {
